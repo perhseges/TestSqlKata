@@ -14,6 +14,8 @@ SqlKata.Compilers.SqlServerCompiler compiler = new();
 IEnumerable<Customers> records;
 Query query;
 
+// Basic SqlKata - https://sqlkata.com/docs/
+
 using (QueryFactory db = new(sqlconnection, compiler))
 {
     db.Logger = compiled => { Console.WriteLine(compiled.ToString()); };
@@ -35,15 +37,21 @@ using (QueryFactory db = new(sqlconnection, compiler))
     foreach (var record in records) Console.WriteLine(record.ContactName);
 }
 
+// Explore the Query object
+
 query = new Query(nameof(Customers)).Take(4).OrderByDesc(nameof(Customers.CustomerID));
 var compiledquery = compiler.Compile(query);
 Console.WriteLine(compiledquery.Sql);
+
+// Wth Dapper...
 
 using (SqlConnection dappercon = new(connectionstring))
 {
     dappercon.Open();
     records = await dappercon.QueryAsync<Customers>(compiledquery.Sql, compiledquery.NamedBindings);
 }
+
+// And raw Sql reader
 
 using (SqlConnection sqlcon = new(connectionstring))
 {
