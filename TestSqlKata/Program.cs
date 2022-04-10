@@ -1,55 +1,86 @@
 ﻿using Dapper;
-using Microsoft.Extensions.Configuration;
-
+using SqlKata;
 using SqlKata.Execution;
 using System.Data.SqlClient;
-using System.IO.Compression;
-using System.Text.Json;
 
-var config = new ConfigurationBuilder().AddUserSecrets<Program>().Build();
+//var config = new ConfigurationBuilder().AddUserSecrets<Program>().Build();
+//var connectionstring = config["ConnectionString"];
 
-var connectionstring = config["ConnectionString"];
+var connectionstring = "Server=127.0.0.1;Database=NorthWind;Trusted_Connection=True;";
 
-
-var connection = new SqlConnection(config["ConnectionString"]);
 var compiler = new SqlKata.Compilers.SqlServerCompiler();
+
+// https://github.com/sqlkata/querybuilder/issues/213 Lack of Connection Dispose in documentation
+
+var connection = new SqlConnection(connectionstring);
 var db = new QueryFactory(connection, compiler);
+db.Logger = compiled => { Console.WriteLine(compiled.ToString()); };
 
-var a = await db.Query("Audit").Take(5).OrderByDesc("Id").GetAsync<Audit>();
+var records = await db
+    .Query(nameof(Customers))
+    .Take(5)
+    .OrderByDesc(nameof(Customers.CustomerID))
+    //.Select(ColumnNames<Customers>("CustomerID", nameof(Customers.ContactName)))
+    .Select("CustomerID", "ContactName")
+    .GetAsync<Customers>();
 
-var b = await db.Query("Audit").Take(7).OrderByDesc("Id").GetAsync<Audit>();
+foreach (var record in records) Console.WriteLine(record.ContactName);
 
-//var query = new Query("Audit").Select("Id"). OrderByDesc("Id").Take(5);
-//SqlResult result = compiler.Compile(query);
-//string sql = result.Sql;
+var query = new Query(nameof(Customers)).OrderByDesc(nameof(Customers.CustomerID));
+query.Take(3);
+records = db.Get<Customers>(query);
 
+//var records = await db.Query<Customers>().Take(5).OrderByDesc(nameof(Customers.CustomerID)).GetAsync<Customers>();
+//var records = await db.Query().FromRaw($"{nameof(Customers)} TABLESAMPLE (5 ROWS)").OrderByDesc(nameof(Customers.CustomerID)).GetAsync<Customers>();
 
-//using (var con = new SqlConnection(connectionstring))
-//{
-//    con.Open();
+foreach (var record in records) Console.WriteLine(record.ContactName);
 
-//    // Dapper 
-//    Console.WriteLine("Fetch data");
+var compiledquery = compiler.Compile(query);
+Console.WriteLine(compiledquery.Sql);
 
-//    var audits = await con.QueryAsync<Audit>("SELECT TOP 20 * FROM Audit ORDER BY Id DESC;");
+using (SqlConnection sqlcon = new(connectionstring))
+{
+    SqlCommand cmd = new SqlCommand(compiledquery.Sql, sqlcon);
+    var sqlparameters = compiledquery.NamedBindings.Select(p => new SqlParameter(p.Key, p.Value)).ToArray();
+    cmd.Parameters.AddRange(sqlparameters);
 
-//    foreach (var audit in audits)
-//    {
-//        using (var memorystream = new MemoryStream())
-//        {
-//            // Data-object (byte array) to transmit
-//            await JsonSerializer.SerializeAsync(memorystream, audit);
-//            var compressedbytes = memorystream.GZipBytes(CompressionMode.Compress);
-            
-//            // Print
-//            var percent = compressedbytes.Length * 100 / memorystream.Length;
-//            Console.WriteLine($"{audit.Updatetime} {memorystream.Length,10:#} {compressedbytes.Length,10:#} {percent,4:#}%");
+    sqlcon.Open();
+    var reader = cmd.ExecuteReader();
+    while (reader.Read())
+        Console.WriteLine(reader[5]);
+    sqlcon.Close();
+};
 
-//            // Unpack received data
-//            var decompressedbytes = compressedbytes.GZipBytes(CompressionMode.Decompress);
-//            var x = JsonSerializer.Deserialize<Audit>(decompressedbytes);
-//        }
-//    }
-//}
+using (SqlConnection dappercon = new(connectionstring))
+{
+    dappercon.Open();
+    records = await dappercon.QueryAsync<Customers>(compiledquery.Sql, compiledquery.NamedBindings);
+}
 
 Console.WriteLine("Finished..");
+
+// -------------------
+
+string[] ColumnNames<T> (params string[] nameof)
+{
+    return nameof.Select(s => $"{typeof(T).Name}.{s}").ToArray();
+}
+
+//    foreach (var record in records) Console.WriteLine(record.ContactName);
+//    //    foreach (var audit in audits)
+//    //    {
+//    //        using (var memorystream = new MemoryStream())
+//    //        {
+//    //            // Data-object (byte array) to transmit
+//    //            await JsonSerializer.SerializeAsync(memorystream, audit);
+//    //            var compressedbytes = memorystream.GZipBytes(CompressionMode.Compress);
+
+//    //            // Print
+//    //            var percent = compressedbytes.Length * 100 / memorystream.Length;
+//    //            Console.WriteLine($"{audit.Updatetime} {memorystream.Length,10:#} {compressedbytes.Length,10:#} {percent,4:#}%");
+
+//    //            // Unpack received data
+//    //            var decompressedbytes = compressedbytes.GZipBytes(CompressionMode.Decompress);
+//    //            var x = JsonSerializer.Deserialize<Audit>(decompressedbytes);
+//    //        }
+//    //    }
